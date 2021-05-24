@@ -44,6 +44,7 @@ pub const Location = struct {
     };
     pub var utc_local = Location.init(std.heap.page_allocator, "UTC");
     var unix_sources = [_][]const u8{
+        "/etc/zoneinfo/",
         "/usr/share/zoneinfo/",
         "/usr/share/lib/zoneinfo/",
         "/usr/lib/locale/TZ/",
@@ -263,17 +264,17 @@ pub const Location = struct {
     /// lookupName returns information about the time zone with
     /// the given name (such as "EST") at the given pseudo-Unix time
     /// (what the given time of day would be in UTC).
-    pub fn lookupName(self: *Location, name: []const u8, unix: i64) !isize {
+    pub fn lookupName(self: *Location, name: []const u8, unix_time: i64) !isize {
         // First try for a zone with the right name that was actually
         // in effect at the given time. (In Sydney, Australia, both standard
         // and daylight-savings time are abbreviated "EST". Using the
         // offset helps us pick the right one for the given time.
         // It's not perfect: during the backward transition we might pick
         // either one.)
-        if (self.zone) |zone| {
-            for (zone) |*z| {
+        if (self.zone) |zn| {
+            for (zn) |*z| {
                 if (mem.eql(u8, z.name, name)) {
-                    const d = self.lookup(unix - @intCast(i64, z.offset));
+                    const d = self.lookup(unix_time - @intCast(i64, z.offset));
                     if (mem.eql(d.name, z.name)) {
                         return d.offset;
                     }
@@ -282,8 +283,8 @@ pub const Location = struct {
         }
 
         // Otherwise fall back to an ordinary name match.
-        if (self.zone) |zone| {
-            for (zone) |*z| {
+        if (self.zone) |zn| {
+            for (zn) |*z| {
                 if (mem.eql(u8, z.name, name)) {
                     return z.offset;
                 }
@@ -342,7 +343,7 @@ pub const Location = struct {
         // Time zone indices for transition times.
         var tx_zone = try arena_allocator.alloc(u8, n[@enumToInt(n_value.Time)]);
         _ = d.read(tx_zone);
-        var tx_zone_data = dataIO.init(tx_zone);
+        _ = dataIO.init(tx_zone);
 
         // Zone info structures
         var zone_data_value = try arena_allocator.alloc(u8, n[@enumToInt(n_value.Zone)] * 6);
@@ -439,7 +440,9 @@ pub const Location = struct {
         var file = try std.fs.File.openRead(path);
         defer file.close();
         var stream = &file.inStream().stream;
-        try stream.readAllBuffer(buf, max_file_size);
+
+        var buf: [4096]u8 = undefined;
+        try stream.readAllBuffer(&buf, max_file_size);
     }
 
     fn loadLocationFile(a: *mem.Allocator, fileName: []const u8, sources: [][]const u8) ![]u8 {
@@ -454,7 +457,7 @@ pub const Location = struct {
             try buf.appendSlice(fileName);
             if (std.fs.cwd().readFileAlloc(a, buf.items, 20 * 1024 * 1024)) |contents| {
                 return contents;
-            } else |err| {
+            } else |_| {
                 continue;
             }
         }
@@ -462,7 +465,6 @@ pub const Location = struct {
     }
 
     fn loadLocationFromTZFile(a: *mem.Allocator, name: []const u8, sources: [][]const u8) !Location {
-        var buf: []u8 = undefined;
         var t = try loadLocationFile(a, name, sources);
         return loadLocationFromTZData(a, name, t);
     }
@@ -481,12 +483,12 @@ pub const Location = struct {
             var env = value;
             defer env.deinit();
             tz = env.get("TZ");
-        } else |err| {}
+        } else |_| {}
         if (tz) |name| {
             if (name.len != 0 and !mem.eql(u8, name, "UTC")) {
                 if (loadLocationFromTZFile(std.heap.page_allocator, name, unix_sources[0..])) |tzone| {
                     return tzone;
-                } else |err| {}
+                } else |_| {}
             }
         } else {
             var etc = [_][]const u8{"/etc/"};
@@ -494,7 +496,7 @@ pub const Location = struct {
                 var zz = tzone;
                 zz.name = "local";
                 return zz;
-            } else |err| {}
+            } else |_| {}
         }
         return utc_local;
     }
@@ -742,6 +744,7 @@ pub const Time = struct {
         const Fri = Thu + 1;
         const Sat = Fri + 1;
         const Sun = Sat + 1;
+        _ = Sun;
 
         // Calculate week as number of Mondays in year up to
         // and including today, plus 1 because the first week is week 0.
@@ -867,8 +870,8 @@ pub const Time = struct {
 
     pub fn format(
         self: Self,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
         out_stream: anytype,
     ) !void {
         try self.string(out_stream);
@@ -943,7 +946,6 @@ pub const Time = struct {
     /// appendFormat is like Format but appends the textual
     /// representation to b
     pub fn appendFormat(self: Self, stream: anytype, layout: []const u8) !void {
-        const abs_value = self.abs();
         const tz = self.zone();
         const clock_value = self.clock();
         const ddate = self.date();
@@ -1111,9 +1113,7 @@ pub const Time = struct {
         }
     }
 
-    fn parseInternal(layout: []const u8, value: []const u8, default_location: *Location, local: *Location) !Self {
-        var alayout = layout;
-        var avalue = value;
+    fn parseInternal(layout: []const u8, value: []const u8, _: *Location, _: *Location) !Self {
         var am_set = false;
         var pm_set = false;
 
@@ -1125,15 +1125,11 @@ pub const Time = struct {
         var parsed_min: isize = 0;
         var parsed_sec: isize = 0;
         var parsed_nsec: isize = 0;
-        var z: ?*Location = null;
-        var zone_offset: isize = -1;
-        var zone_name = "";
 
         var lay = layout;
         var val = value;
         while (true) {
             const ctx = nextStdChunk(lay);
-            const std_str = lay[ctx.prefix.len..(lay.len - ctx.suffix.len)];
             val = try skip(val, ctx.prefix);
 
             if (ctx.chunk == .none) {
@@ -1149,7 +1145,6 @@ pub const Time = struct {
                     }
                     const p = val[0..2];
                     val = val[2..];
-                    var has_err = false;
                     parsed_year = try std.fmt.parseInt(isize, p, 10);
                     if (parsed_year >= 69) {
                         // Unix time starts Dec 31 1969 in some time zones
@@ -1514,7 +1509,6 @@ pub const Time = struct {
     }
 
     pub fn beginningOfWeek(self: Self) Self {
-        var t = self.beginningOfDay();
         const week_day = @intCast(isize, @enumToInt(self.weekday()));
         return self.addDate(0, 0, -week_day);
     }
@@ -1534,8 +1528,8 @@ pub const Time = struct {
     }
 
     pub fn endOfMonth(self: Self) Self {
-        return self.beginningOfMonth().addDate(0, 1, 0).
-            add(Duration.init(-Duration.Hour.value));
+        return self.beginningOfMonth().addDate(0, 1, 0)
+            .add(Duration.init(-Duration.Hour.value));
     }
 
     fn current_month() [4][7]usize {
@@ -1562,9 +1556,7 @@ pub const Time = struct {
         const today = current_time.day();
         var begin = current_time.beginningOfMonth();
         var end = current_time.endOfMonth();
-        const x = begin.date();
         const y = end.date();
-        var i: usize = 1;
         var at = @enumToInt(begin.weekday());
         var mx: usize = 0;
         var d: usize = 1;
@@ -1578,7 +1570,7 @@ pub const Time = struct {
         }
         warn("\n", .{});
         for (short_days) |ds| {
-            warn("{} |", .{ds});
+            warn("{s} |", .{ds});
         }
         warn("\n", .{});
         for (m) |mv, idx| {
@@ -1754,8 +1746,8 @@ pub const Duration = struct {
 
     pub fn format(
         self: Duration,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
         out_stream: anytype,
     ) !void {
         try out_stream(context, self.string());
@@ -1802,7 +1794,7 @@ pub const Duration = struct {
         if (m.value <= 0) {
             return self;
         }
-        return init(self.value - @mod(d.value, m.value));
+        return init(self.value - @mod(self.value, m.value));
     }
 
     // lessThanHalf reports whether x+x < y but avoids overflow,
@@ -1819,8 +1811,8 @@ pub const Duration = struct {
     // Round returns the maximum (or minimum) duration.
     // If m <= 0, Round returns d unchanged.
     pub fn round(self: Duration, m: Duration) Duration {
-        if (v.value <= 0) {
-            return d;
+        if (m.value <= 0) {
+            return self;
         }
         var r = init(@mod(self.value, m.value));
         if (self.value < 0) {
@@ -1903,7 +1895,6 @@ pub fn date(
     var v_min = min;
     var v_sec = sec;
     var v_nsec = nsec;
-    var v_loc = loc;
 
     // Normalize month, overflowing into year
     var m = month - 1;
@@ -2033,8 +2024,8 @@ pub const Month = enum(usize) {
 
     pub fn format(
         self: Month,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
         out_stream: anytype,
     ) !void {
         try out_stream.writeAll(self.string());
@@ -2175,8 +2166,8 @@ pub const Weekday = enum(usize) {
 
     pub fn format(
         self: Weekday,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
         out_stream: anytype,
     ) !void {
         try out_stream(context, self.string());
@@ -2213,7 +2204,7 @@ pub fn now(local: *Location) Time {
 }
 
 fn unixTime(sec: i64, nsec: i32) Time {
-    var local = getLocal();
+    var local = Location.getLocal();
     return unixTimeWithLoc(sec, nsec, local);
 }
 
@@ -2250,7 +2241,7 @@ fn timeNow() bintime {
     switch (builtin.os.tag) {
         .linux => {
             var ts: std.os.timespec = undefined;
-            const err = std.os.clock_gettime(std.os.CLOCK_REALTIME, &ts) catch unreachable;
+            _ = std.os.clock_gettime(std.os.CLOCK.REALTIME, &ts) catch unreachable;
             return bintime{ .sec = ts.tv_sec, .nsec = ts.tv_nsec, .mono = clockNative() };
         },
         .macos, .ios => {
@@ -2283,8 +2274,8 @@ fn clockDarwin() u64 {
 
 fn clockLinux() u64 {
     var ts: std.os.timespec = undefined;
-    var result = std.os.linux.clock_gettime(std.os.CLOCK_MONOTONIC, &ts);
-    assert(std.os.linux.getErrno(result) == 0);
+    var result = std.os.linux.clock_gettime(std.os.CLOCK.MONOTONIC, &ts);
+    assert(@enumToInt(std.os.linux.getErrno(result)) == 0);
     return @intCast(u64, ts.tv_sec) * @as(u64, 1000000000) + @intCast(u64, ts.tv_nsec);
 }
 
@@ -2893,8 +2884,8 @@ const Fraction = struct {
 
 fn leadingFraction(s: []const u8) !Fraction {
     var i: usize = 0;
-    var scale: f64 = 1;
-    var overflow = false;
+    // var scale: f64 = 1;
+    // var overflow = false;
     while (i < s.len) : (i += 1) {
         //TODO(gernest): finish leadingFraction
     }

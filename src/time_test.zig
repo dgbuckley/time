@@ -105,9 +105,9 @@ test "TestSecondsToUTC" {
     for (utc_tests) |ts| {
         var tm = time.unix(ts.seconds, 0, &Location.utc_local);
         const ns = tm.unix();
-        testing.expectEqual(ns, ts.seconds);
+        try testing.expectEqual(ns, ts.seconds);
         var golden = ts.golden;
-        testing.expect(same(tm, &golden));
+        try testing.expect(same(tm, &golden));
     }
 }
 
@@ -118,8 +118,8 @@ test "TestNanosecondsToUTC" {
         const nsec = tv.seconds * @as(i64, 1e9) + @intCast(i64, golden.nanosecond);
         var tm = time.unix(0, nsec, &Location.utc_local);
         const new_nsec = tm.unix() * @as(i64, 1e9) + @intCast(i64, tm.nanosecond());
-        testing.expectEqual(new_nsec, nsec);
-        testing.expect(same(tm, &golden));
+        try testing.expectEqual(new_nsec, nsec);
+        try testing.expect(same(tm, &golden));
     }
 }
 
@@ -132,8 +132,8 @@ test "TestSecondsToLocalTime" {
         const sec = tv.seconds;
         var tm = time.unix(sec, 0, &loc);
         const new_sec = tm.unix();
-        testing.expectEqual(new_sec, sec);
-        testing.expect(same(tm, &golden));
+        try testing.expectEqual(new_sec, sec);
+        try testing.expect(same(tm, &golden));
     }
 }
 
@@ -146,8 +146,8 @@ test "TestNanosecondsToUTC" {
         const nsec = tv.seconds * @as(i64, 1e9) + @intCast(i64, golden.nanosecond);
         var tm = time.unix(0, nsec, &loc);
         const new_nsec = tm.unix() * @as(i64, 1e9) + @intCast(i64, tm.nanosecond());
-        testing.expectEqual(new_nsec, nsec);
-        testing.expect(same(tm, &golden));
+        try testing.expectEqual(new_nsec, nsec);
+        try testing.expect(same(tm, &golden));
     }
 }
 
@@ -194,7 +194,7 @@ test "TestFormat" {
     for (format_tests) |value| {
         try buf.resize(0);
         try ts.formatBuffer(buf.writer(), value.format);
-        testing.expect(std.mem.eql(u8, buf.items, value.result));
+        try testing.expect(std.mem.eql(u8, buf.items, value.result));
     }
 }
 
@@ -216,12 +216,12 @@ test "TestFormatSingleDigits" {
     const ts = formatTest.init("single digit format", "3:4:5", "4:5:6");
 
     try tt.formatBuffer(buf.writer(), ts.format);
-    testing.expect(std.mem.eql(u8, buf.items, ts.result));
+    try testing.expect(std.mem.eql(u8, buf.items, ts.result));
 
     const want = "2001-02-03 04:05:06.7 +0000 UTC";
     try buf.resize(0);
     try buf.writer().print("{}", .{tt});
-    testing.expect(std.mem.eql(u8, buf.items, want));
+    try testing.expect(std.mem.eql(u8, buf.items, want));
 }
 
 test "TestFormatShortYear" {
@@ -260,7 +260,7 @@ test "TestFormatShortYear" {
             try want.writer().print("{d:0>4}.{d:0>2}.{d:0>2}", .{ math.absCast(y), month, day });
         }
         if (!std.mem.eql(u8, buf.items, want.items)) {
-            std.debug.warn("case: '{}' expected '{}' got '{}'\n", .{ y, want.items, buf.items });
+            std.debug.warn("case: '{}' expected '{s}' got '{s}'\n", .{ y, want.items, buf.items });
         }
     }
 }
@@ -276,7 +276,7 @@ test "TestNextStdChunk" {
     };
     var buf = std.ArrayList([]const u8).init(std.testing.allocator);
     defer buf.deinit();
-    for (next_std_chunk_tests) |marked, i| {
+    for (next_std_chunk_tests) |marked| {
         try markChunk(&buf, marked);
         // FIXME: fix check, buf.items doesn't work
         // testing.expect(std.mem.eql([]const u8, buf.items, bufM.items));
