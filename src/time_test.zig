@@ -260,7 +260,7 @@ test "TestFormatShortYear" {
             try want.writer().print("{d:0>4}.{d:0>2}.{d:0>2}", .{ math.absCast(y), month, day });
         }
         if (!std.mem.eql(u8, buf.items, want.items)) {
-            std.debug.warn("case: '{}' expected '{}' got '{}'\n", .{ y, want.items, buf.items });
+            std.debug.warn("case: '{}' expected '{s}' got '{s}'\n", .{ y, want.items, buf.items });
         }
     }
 }

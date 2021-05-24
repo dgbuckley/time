@@ -1534,8 +1534,8 @@ pub const Time = struct {
     }
 
     pub fn endOfMonth(self: Self) Self {
-        return self.beginningOfMonth().addDate(0, 1, 0).
-            add(Duration.init(-Duration.Hour.value));
+        return self.beginningOfMonth().addDate(0, 1, 0)
+            .add(Duration.init(-Duration.Hour.value));
     }
 
     fn current_month() [4][7]usize {
@@ -1578,7 +1578,7 @@ pub const Time = struct {
         }
         warn("\n", .{});
         for (short_days) |ds| {
-            warn("{} |", .{ds});
+            warn("{s} |", .{ds});
         }
         warn("\n", .{});
         for (m) |mv, idx| {
